@@ -10,88 +10,41 @@ import (
 	"unicode"
 )
 
-type mode int
-
-const (
-	initial mode = iota
-	str
-	integer
-	list
-	dict
-)
-
-func newNonNilInterface() interface{} {
-	return *new(interface{})
-}
-
-// Example:
-// - 5:hello -> hello
-// - 10:hello12345 -> hello12345
-func decodeBencode(bencodedString string) (interface{}, error) {
-	stack := []interface{}{}
-
-	modes := []mode{initial}
-
-	current := newNonNilInterface()
-
-	for len(bencodedString) != 0 {
-		fmt.Println(bencodedString)
-		res := newNonNilInterface()
-		if unicode.IsDigit(rune(bencodedString[0])) {
-			newRes, newWork, err := decodeString(bencodedString)
-			if err != nil {
-				return nil, err
-			}
-			bencodedString = newWork
-			res = newRes
-		} else if bencodedString[0] == 'i' {
-			newRes, newWork, err := decodeNumber(bencodedString)
-			if err != nil {
-				return nil, err
-			}
-			bencodedString = newWork
-			res = newRes
-		} else if bencodedString[0] == 'l' {
-			newInterface := new([]interface{})
-			current = *newInterface
-			modes = append(modes, list)
-			bencodedString = bencodedString[1:]
-		} else if bencodedString[0] == 'd' {
-			return nil, errors.New("dictionaries not implemented yet")
-		} else if bencodedString[0] == 'e' {
-			modes = modes[:len(modes)-1]
-			current = newNonNilInterface()
-			bencodedString = bencodedString[1:]
-		} else {
-			return nil, errors.New("unable to determine action to take for remaining work:" + bencodedString)
+func decodeBencode(b string) (interface{}, string, error) {
+	if strings.HasPrefix(b, "i") {
+		res, left, err := decodeNumber(b)
+		if err != nil {
+			return nil, "", err
 		}
-
-		if len(modes) == 0 {
-			break
-		}
-
-		switch lastMode(modes) {
-		case list:
-			if current != nil {
-				current = append(current.([]interface{}), res)
-			} else {
-				current = []interface{}{res}
-			}
-		case dict:
-			return nil, errors.New("dict not implemented")
-		default:
-			stack = append(stack, res)
-		}
+		return res, left, nil
 	}
 
-	return stack, nil
-}
+	if strings.HasPrefix(b, "l") {
+		list := []interface{}{}
+		var res interface{}
+		var err error
 
-func lastMode(modes []mode) mode {
-	if len(modes) > 1 {
-		return modes[len(modes)-1]
+		left := b[1:]
+
+		for !strings.HasPrefix(left, "e") {
+			res, left, err = decodeBencode(left)
+			if err != nil {
+				return nil, "", err
+			}
+			list = append(list, res)
+		}
+		return list, left[1:], nil
 	}
-	return modes[0]
+
+	if unicode.IsDigit(rune(b[0])) {
+		res, left, err := decodeString(b)
+		if err != nil {
+			return nil, "", err
+		}
+		return res, left, nil
+	}
+
+	return nil, "", errors.New("expected bencoded string, got " + b)
 }
 
 func decodeString(b string) (string, string, error) {
@@ -120,7 +73,7 @@ func decodeNumber(b string) (int, string, error) {
 	if err != nil {
 		return 0, "", err
 	}
-	return out, b[e:], nil
+	return out, b[e+1:], nil
 }
 
 func main() {
@@ -129,7 +82,7 @@ func main() {
 	if command == "decode" {
 		bencodedValue := os.Args[2]
 
-		decoded, err := decodeBencode(bencodedValue)
+		decoded, _, err := decodeBencode(bencodedValue)
 		if err != nil {
 			fmt.Println(err)
 			return
