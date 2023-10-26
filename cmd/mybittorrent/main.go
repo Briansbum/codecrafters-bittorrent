@@ -44,6 +44,27 @@ func decodeBencode(b string) (interface{}, string, error) {
 		return res, left, nil
 	}
 
+	if strings.HasPrefix(b, "d") {
+		dict := map[string]interface{}{}
+		left := b[1:]
+		var key string
+		var res interface{}
+		var err error
+
+		for !strings.HasPrefix(left, "e") {
+			key, left, err = decodeString(left)
+			if err != nil {
+				return nil, "", err
+			}
+			res, left, err = decodeBencode(left)
+			if err != nil {
+				return nil, "", err
+			}
+			dict[key] = res
+		}
+		return dict, left, nil
+	}
+
 	return nil, "", errors.New("expected bencoded string, got " + b)
 }
 
