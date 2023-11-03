@@ -100,7 +100,8 @@ func decodeNumber(b string) (int, string, error) {
 func main() {
 	command := os.Args[1]
 
-	if command == "decode" {
+	switch command {
+	case "decode":
 		bencodedValue := os.Args[2]
 
 		decoded, _, err := decodeBencode(bencodedValue)
@@ -114,7 +115,23 @@ func main() {
 			panic(err)
 		}
 		fmt.Println(string(jsonOutput))
-	} else {
+	case "info":
+		filename := os.Args[2]
+
+		torrentFileBytes, err := os.ReadFile(filename)
+		if err != nil {
+			panic(err)
+		}
+
+		decoded, _, err := decodeBencode(string(torrentFileBytes))
+		if err != nil {
+			panic(err)
+		}
+		decodedMap := decoded.(map[string]interface{})
+		fmt.Println("Tracker URL: " + decodedMap["announce"].(string))
+
+		fmt.Printf("Length: %d", decodedMap["info"].(map[string]interface{})["length"])
+	default:
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
 	}
