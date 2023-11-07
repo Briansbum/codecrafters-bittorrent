@@ -1,10 +1,12 @@
 package main
 
 import (
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -97,6 +99,59 @@ func decodeNumber(b string) (int, string, error) {
 	return out, b[e+1:], nil
 }
 
+func bencode(d interface{}) (string, error) {
+	out := ""
+
+	switch d.(type) {
+	case string:
+		s := d.(string)
+		out = out + fmt.Sprintf("%d:%s", len(s), s)
+	case int:
+		out = out + fmt.Sprintf("i%de", d.(int))
+	case map[string]interface{}:
+		out = out + "d"
+
+		keys := []string{}
+		for k, _ := range d.(map[string]interface{}) {
+			keys = append(keys, k)
+		}
+		sort.Slice(keys, func(i, j int) bool {
+			return keys[i] < keys[j]
+		})
+
+		for _, k := range keys {
+			keyEncode, err := bencode(k)
+			if err != nil {
+				return "", err
+			}
+			out = out + keyEncode
+
+			valueEncode, err := bencode(d.(map[string]interface{})[k])
+			if err != nil {
+				return "", err
+			}
+			out = out + valueEncode
+		}
+		out = out + "e"
+	case []interface{}:
+		out = out + "l"
+
+		for _, li := range d.([]interface{}) {
+			valueBencode, err := bencode(li)
+			if err != nil {
+				return "", err
+			}
+			out = out + valueBencode
+		}
+
+		out = out + "e"
+	default:
+		return "", fmt.Errorf("type of %+v must be one of string,int,list,dict but got: %T", d, d)
+	}
+
+	return out, nil
+}
+
 func main() {
 	command := os.Args[1]
 
@@ -128,9 +183,22 @@ func main() {
 			panic(err)
 		}
 		decodedMap := decoded.(map[string]interface{})
-		fmt.Println("Tracker URL: " + decodedMap["announce"].(string))
 
-		fmt.Printf("Length: %d", decodedMap["info"].(map[string]interface{})["length"])
+		info := fmt.Sprintf("Tracker URL: %s\n", decodedMap["announce"].(string))
+
+		info = info + fmt.Sprintf("Length: %d\n", decodedMap["info"].(map[string]interface{})["length"])
+
+		infoBencoded, err := bencode(decodedMap["info"])
+		if err != nil {
+			panic(err)
+		}
+		if _, _, err := decodeBencode(infoBencoded); err != nil {
+			fmt.Printf("error decoding after encode, something went wrong with encoding: %+v\n", err)
+		}
+
+		info = info + fmt.Sprintf("Info Hash: %x\n", sha1.Sum([]byte(infoBencoded)))
+
+		fmt.Println(info)
 	default:
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
