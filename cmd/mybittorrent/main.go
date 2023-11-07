@@ -197,6 +197,14 @@ func main() {
 		}
 
 		info = info + fmt.Sprintf("Info Hash: %x\n", sha1.Sum([]byte(infoBencoded)))
+		info = info + fmt.Sprintf("Piece Length: %d\n", decodedMap["info"].(map[string]interface{})["piece length"].(int))
+		info = info + fmt.Sprintf("Piece Hashes: \n")
+
+		pieces := []byte(decodedMap["info"].(map[string]interface{})["pieces"].(string))
+		for i := len(pieces) / 20; i != 0; i-- {
+			info = info + fmt.Sprintf("%x\n", pieces[:20])
+			pieces = pieces[20:]
+		}
 
 		fmt.Println(info)
 	default:
