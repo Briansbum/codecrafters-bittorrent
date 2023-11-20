@@ -2,9 +2,14 @@ package main
 
 import (
 	"crypto/sha1"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -152,6 +157,47 @@ func bencode(d interface{}) (string, error) {
 	return out, nil
 }
 
+func torrentInfo(t interface{}) (string, error) {
+	decodedMap := t.(map[string]interface{})
+
+	info := fmt.Sprintf("Tracker URL: %s\n", decodedMap["announce"].(string))
+
+	info = info + fmt.Sprintf("Length: %d\n", decodedMap["info"].(map[string]interface{})["length"])
+
+	hash, err := infoHash(decodedMap)
+	if err != nil {
+		return "", err
+	}
+
+	info = info + fmt.Sprintf("Info Hash: %x\n", hash)
+	info = info + fmt.Sprintf("Piece Length: %d\n", decodedMap["info"].(map[string]interface{})["piece length"].(int))
+	info = info + fmt.Sprintf("Piece Hashes: \n")
+
+	pieces := []byte(decodedMap["info"].(map[string]interface{})["pieces"].(string))
+	for i := len(pieces) / 20; i != 0; i-- {
+		info = info + fmt.Sprintf("%x\n", pieces[:20])
+		pieces = pieces[20:]
+	}
+
+	return info, nil
+}
+
+func infoHash(decodedMap map[string]interface{}) ([]byte, error) {
+	infoBencoded, err := bencode(decodedMap["info"])
+	if err != nil {
+		return nil, err
+	}
+	if _, _, err := decodeBencode(infoBencoded); err != nil {
+		return nil, fmt.Errorf("error decoding after encode, something went wrong with encoding: %w", err)
+	}
+	hasher := sha1.New()
+	if _, err := hasher.Write([]byte(infoBencoded)); err != nil {
+		return nil, err
+	}
+
+	return hasher.Sum(nil), nil
+}
+
 func main() {
 	command := os.Args[1]
 
@@ -182,31 +228,71 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		decodedMap := decoded.(map[string]interface{})
 
-		info := fmt.Sprintf("Tracker URL: %s\n", decodedMap["announce"].(string))
-
-		info = info + fmt.Sprintf("Length: %d\n", decodedMap["info"].(map[string]interface{})["length"])
-
-		infoBencoded, err := bencode(decodedMap["info"])
+		info, err := torrentInfo(decoded)
 		if err != nil {
 			panic(err)
 		}
-		if _, _, err := decodeBencode(infoBencoded); err != nil {
-			fmt.Printf("error decoding after encode, something went wrong with encoding: %+v\n", err)
-		}
-
-		info = info + fmt.Sprintf("Info Hash: %x\n", sha1.Sum([]byte(infoBencoded)))
-		info = info + fmt.Sprintf("Piece Length: %d\n", decodedMap["info"].(map[string]interface{})["piece length"].(int))
-		info = info + fmt.Sprintf("Piece Hashes: \n")
-
-		pieces := []byte(decodedMap["info"].(map[string]interface{})["pieces"].(string))
-		for i := len(pieces) / 20; i != 0; i-- {
-			info = info + fmt.Sprintf("%x\n", pieces[:20])
-			pieces = pieces[20:]
-		}
 
 		fmt.Println(info)
+	case "peers":
+		filename := os.Args[2]
+
+		torrentFileBytes, err := os.ReadFile(filename)
+		if err != nil {
+			panic(err)
+		}
+
+		decoded, _, err := decodeBencode(string(torrentFileBytes))
+		if err != nil {
+			panic(err)
+		}
+
+		host := decoded.(map[string]interface{})["announce"].(string)
+
+		hash, err := infoHash(decoded.(map[string]interface{}))
+		if err != nil {
+			panic(err)
+		}
+
+		params := url.Values{}
+
+		params.Add("info_hash", string(hash))
+		params.Add("peer_id", "00112233445566778899")
+		params.Add("port", "6881")
+		params.Add("uploaded", "0")
+		params.Add("downloaded", "0")
+		params.Add("left", strconv.Itoa(decoded.(map[string]interface{})["info"].(map[string]interface{})["length"].(int)))
+		params.Add("compact", "1")
+
+		resp, err := http.Get(host + "?" + params.Encode())
+		if err != nil {
+			panic(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode > 299 {
+			panic("wrong status " + resp.Status + " when calling " + host + "?" + params.Encode())
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			panic(err)
+		}
+
+		decodedResp, _, err := decodeBencode(string(body))
+		if err != nil {
+			panic(err)
+		}
+
+		peers := []byte(decodedResp.(map[string]interface{})["peers"].(string))
+
+		for i := 0; i < len(peers)/6; i++ {
+			offset := i * 6
+			peer := peers[offset : offset+6]
+			ip := net.IP(peer[:4])
+			port := binary.BigEndian.Uint16([]byte{peers[offset+4], peers[offset+5]})
+			fmt.Printf("%s:%d\n", ip.String(), port)
+		}
 	default:
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
