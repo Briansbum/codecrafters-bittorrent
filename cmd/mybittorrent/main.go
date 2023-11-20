@@ -198,6 +198,46 @@ func infoHash(decodedMap map[string]interface{}) ([]byte, error) {
 	return hasher.Sum(nil), nil
 }
 
+func requestPeers(decoded interface{}) ([]byte, error) {
+	host := decoded.(map[string]interface{})["announce"].(string)
+
+	hash, err := infoHash(decoded.(map[string]interface{}))
+	if err != nil {
+		return nil, err
+	}
+
+	params := url.Values{}
+
+	params.Add("info_hash", string(hash))
+	params.Add("peer_id", "00112233445566778899")
+	params.Add("port", "6881")
+	params.Add("uploaded", "0")
+	params.Add("downloaded", "0")
+	params.Add("left", strconv.Itoa(decoded.(map[string]interface{})["info"].(map[string]interface{})["length"].(int)))
+	params.Add("compact", "1")
+
+	resp, err := http.Get(host + "?" + params.Encode())
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode > 299 {
+		return nil, errors.New("wrong status " + resp.Status + " when calling " + host + "?" + params.Encode())
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	decodedResp, _, err := decodeBencode(string(body))
+	if err != nil {
+		return nil, err
+	}
+
+	return []byte(decodedResp.(map[string]interface{})["peers"].(string)), nil
+}
+
 func main() {
 	command := os.Args[1]
 
@@ -248,43 +288,10 @@ func main() {
 			panic(err)
 		}
 
-		host := decoded.(map[string]interface{})["announce"].(string)
-
-		hash, err := infoHash(decoded.(map[string]interface{}))
+		peers, err := requestPeers(decoded)
 		if err != nil {
 			panic(err)
 		}
-
-		params := url.Values{}
-
-		params.Add("info_hash", string(hash))
-		params.Add("peer_id", "00112233445566778899")
-		params.Add("port", "6881")
-		params.Add("uploaded", "0")
-		params.Add("downloaded", "0")
-		params.Add("left", strconv.Itoa(decoded.(map[string]interface{})["info"].(map[string]interface{})["length"].(int)))
-		params.Add("compact", "1")
-
-		resp, err := http.Get(host + "?" + params.Encode())
-		if err != nil {
-			panic(err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode > 299 {
-			panic("wrong status " + resp.Status + " when calling " + host + "?" + params.Encode())
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			panic(err)
-		}
-
-		decodedResp, _, err := decodeBencode(string(body))
-		if err != nil {
-			panic(err)
-		}
-
-		peers := []byte(decodedResp.(map[string]interface{})["peers"].(string))
 
 		for i := 0; i < len(peers)/6; i++ {
 			offset := i * 6
