@@ -300,6 +300,26 @@ func main() {
 			port := binary.BigEndian.Uint16([]byte{peers[offset+4], peers[offset+5]})
 			fmt.Printf("%s:%d\n", ip.String(), port)
 		}
+	case "handshake":
+		filename := os.Args[2]
+		peer := strings.Split(os.Args[3], ":")
+
+		peerIP := net.IP([]byte(peer[0]))
+		peerPort, err := strconv.Atoi(peer[1])
+		if err != nil {
+			panic(err)
+		}
+
+		conn, err := net.DialTCP("tcp", nil, &net.TCPAddr{
+			IP:   peerIP,
+			Port: peerPort,
+		})
+		if err != nil {
+			panic(err)
+		}
+		defer conn.Close()
+
+		conn.Write([]byte{})
 	default:
 		fmt.Println("Unknown command: " + command)
 		os.Exit(1)
